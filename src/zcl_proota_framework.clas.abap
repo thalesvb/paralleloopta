@@ -7,47 +7,49 @@ class zcl_proota_framework definition
 
     class-methods before_rfc
       importing
-        !p_before_rfc_imp     type spta_t_before_rfc_imp
+        p_before_rfc_imp     type spta_t_before_rfc_imp
       changing
-        !pt_rfcdata           type spta_t_indxtab
-        !p_failed_objects     type spta_t_failed_objects
-        !p_before_rfc_exp     type spta_t_before_rfc_exp
-        !p_objects_in_process type spta_t_objects_in_process
-        !p_user_param         type data .
+        pt_rfcdata           type spta_t_indxtab
+        p_failed_objects     type spta_t_failed_objects
+        p_before_rfc_exp     type spta_t_before_rfc_exp
+        p_objects_in_process type spta_t_objects_in_process
+        p_user_param         type data .
     class-methods in_rfc
       importing
-        !p_in_rfc_imp type spta_t_in_rfc_imp
+        p_in_rfc_imp type spta_t_in_rfc_imp
       changing
-        !p_in_rfc_exp type spta_t_in_rfc_exp
-        !p_rfcdata    type spta_t_indxtab .
+        p_in_rfc_exp type spta_t_in_rfc_exp
+        p_rfcdata    type spta_t_indxtab .
     class-methods after_rfc
       importing
-        !p_rfcdata            type spta_t_indxtab
-        !p_rfcsubrc           type sy-subrc
-        !p_rfcmsg             type spta_t_rfcmsg
-        !p_objects_in_process type spta_t_objects_in_process
-        !p_after_rfc_imp      type spta_t_after_rfc_imp
+        p_rfcdata            type spta_t_indxtab
+        p_rfcsubrc           type sy-subrc
+        p_rfcmsg             type spta_t_rfcmsg
+        p_objects_in_process type spta_t_objects_in_process
+        p_after_rfc_imp      type spta_t_after_rfc_imp
       changing
-        !p_after_rfc_exp      type spta_t_after_rfc_exp
-        !p_user_param         type data .
+        p_after_rfc_exp      type spta_t_after_rfc_exp
+        p_user_param         type data .
     class-methods run
       importing
-        !parallel_code type ref to zif_proota_parallel_code .
+        parallel_code type ref to zif_proota_parallel_code
+        server_group type spta_rfcgr default 'parallel_generators'
+        max_tasks type i optional.
   protected section.
   private section.
 
     types:
-      begin of gty_user_params,
-        cls_name type string, "Not using seoclsname because local class naming doesn't fit on it, only global classes.
+      begin of runtime_params,
+        class_name type string, "Not using seoclsname because local class full name doesn't fit on it, only global classes.
         instance type ref to zif_proota_parallel_code,
-      end of gty_user_params .
+      end of runtime_params.
     types:
-      begin of gty_context_input,
-        cls_name type gty_user_params-cls_name,
+      begin of runtime_input,
+        class_name type runtime_params-class_name,
         data     type xstring,
-      end of gty_context_input .
+      end of runtime_input .
 
-    constants gc_callback_program type programm value 'YTVBP_OOPTA_PRG' ##NO_TEXT.
+    constants callback_program type programm value 'ZPROOTA_FRM' ##NO_TEXT.
 endclass.
 
 
@@ -57,18 +59,15 @@ class zcl_proota_framework implementation.
 
   method after_rfc.
     data:
-      context_output type ref to data,
+      context_output type zif_proota_parallel_code=>context_output,
       parallel_code  type ref to zif_proota_parallel_code.
     field-symbols:
       <ctx>   type data,
-      <param> type gty_user_params.
+      <param> type runtime_params.
 
     assign p_user_param to <param>.
     parallel_code = <param>-instance.
-    parallel_code->context_output(
-      importing
-        er_data = context_output
-    ).
+    context_output = parallel_code->create_context_output_object( ).
     assign context_output->* to <ctx>.
 
     call function 'SPTA_INDX_PACKAGE_DECODE'
@@ -77,20 +76,20 @@ class zcl_proota_framework implementation.
       importing
         data    = <ctx>.
     if p_rfcsubrc is initial.
-*   No RFC error occured
-      parallel_code->merge( ctx = context_output ).
+*   No RFC error occurred
+      parallel_code->process_task_output( task_output = context_output ).
     endif.
 
 * Error handling
 * Note: An incorrect way to handle application specific errors
 *       may lead to an infinite loop in the application, because
 *       if an error is returned to the task manager that object
-*       ist rescheduled in the FAILED_OBJS table and is supposed
+*       is rescheduled in the FAILED_OBJS table and is supposed
 *       to be reprocessed again which may lead to another application
 *       error. The only way out of this behaviour is to set
 *       the flag 'NO_RESUBMISSION_ON_ERROR' to the task manager
 *       and store an error message in the application's error log.
-*       Hoever there are situations where is is appropriate
+*       However there are situations where is is appropriate
 *       to not set this flag and thus allow a resubmission of those
 *       objects:
 *       - If one aRFC processes 100 objects and the task fails
@@ -105,37 +104,39 @@ class zcl_proota_framework implementation.
 
   method before_rfc.
     data:
-      ld_failed_obj     like line of p_failed_objects,
-      context_input     type zif_proota_parallel_code=>gty_context_input,
-      parallel_code     type ref to zif_proota_parallel_code,
-      wa_obj_in_process like line of p_objects_in_process.
+      failed_task   like line of p_failed_objects,
+      context_input type zif_proota_parallel_code=>context_input,
+      parallel_code type ref to zif_proota_parallel_code,
+      pending_task  like line of p_objects_in_process,
+      runtime_input type runtime_input.
     field-symbols:
       <context_input> type data,
-      <param>         type gty_user_params.
+      <params>        type runtime_params.
 
-    assign p_user_param to <param>.
-    parallel_code = <param>-instance.
+    assign p_user_param to <params>.
+    parallel_code = <params>-instance.
 * Check if there are objects from previously failed tasks left ...
-    read table p_failed_objects index 1 into ld_failed_obj.
+    read table p_failed_objects index 1 into failed_task.
     if sy-subrc = 0.
 * Yes there are.
 * Take first object and delete it from list of failed objects
       delete p_failed_objects index 1.
       append initial line to p_objects_in_process assigning field-symbol(<obj_in_process>).
-      <obj_in_process> = ld_failed_obj.
+      <obj_in_process> = failed_task.
     else.
 * No there aren't.
 * Take objects from regular input list of objects
-      parallel_code->fetch_block_data(
+      parallel_code->prepare_task_input(
 *        EXPORTING
 *          block_id    =
         importing
-          ev_block_id = wa_obj_in_process-obj_id
-          e_data      = context_input
+          task_id = pending_task-obj_id
+          task_input      = context_input
       ).
 
-      if wa_obj_in_process-obj_id is not initial.
-        append wa_obj_in_process to p_objects_in_process.
+      if pending_task-obj_id is not initial or
+         context_input is not initial.
+        append pending_task to p_objects_in_process.
       endif.
     endif.
 
@@ -156,13 +157,12 @@ class zcl_proota_framework implementation.
 * Convert the input data into the INDX structure
 * that is needed for the RFC
     if context_input is bound.
+      runtime_input-class_name = <params>-class_name.
       assign context_input->* to <context_input>.
-      data wa_fw_ctx_input type gty_context_input.
-      wa_fw_ctx_input-cls_name = <param>-cls_name.
-      export data from <context_input> to data buffer wa_fw_ctx_input-data.
+      export data from <context_input> to data buffer runtime_input-data.
       call function 'SPTA_INDX_PACKAGE_ENCODE'
         exporting
-          data    = wa_fw_ctx_input
+          data    = runtime_input
         importing
           indxtab = pt_rfcdata.
     endif.
@@ -178,7 +178,7 @@ class zcl_proota_framework implementation.
       parallel        type ref to zif_proota_parallel_code,
       context_input   type ref to data,
       context_output  type ref to data,
-      ls_fw_ctx_input type gty_context_input.
+      runtime_input type runtime_input.
     field-symbols:
       <input_context>  type data,
       <output_context> type data.
@@ -188,24 +188,22 @@ class zcl_proota_framework implementation.
       exporting
         indxtab = p_rfcdata
       importing
-        data    = ls_fw_ctx_input.
-    create object parallel type (ls_fw_ctx_input-cls_name).
-    parallel->context_input( importing er_data = context_input ).
-    assert
-      condition context_input is bound.
+        data    = runtime_input.
+    create object parallel type (runtime_input-class_name).
+    context_input = parallel->create_context_input_object( ).
+    assert context_input is bound.
     assign context_input->* to <input_context>.
-    parallel->context_output( importing er_data = context_output ).
-    assert
-      condition context_output is bound.
+    context_output = parallel->create_context_output_object( ).
+    assert context_output is bound.
     assign context_output->* to <output_context>.
 * Unpack app data
-    import data = <input_context> from data buffer ls_fw_ctx_input-data.
+    import data = <input_context> from data buffer runtime_input-data.
 * Begin processing of RFC
     parallel->worker(
       exporting
-        i_ctx = context_input
+        input = context_input
       importing
-        e_ctx = context_output
+        output = context_output
     ).
 * Repack output data for AFTER_RFC form
     call function 'SPTA_INDX_PACKAGE_ENCODE'
@@ -219,26 +217,24 @@ class zcl_proota_framework implementation.
 
   method run.
     data:
-      lv_server_group type spta_rfcgr value 'parallel_generators',
-      lv_max_tasks    type sy-index value 1,
-      ls_user_param   type gty_user_params.
+      runtime_params   type runtime_params.
 
-    ls_user_param-cls_name = cl_abap_classdescr=>get_class_name( p_object = parallel_code ).
-    ls_user_param-instance = parallel_code.
+    runtime_params-class_name = cl_abap_classdescr=>get_class_name( p_object = parallel_code ).
+    runtime_params-instance = parallel_code.
 
     call function 'SPTA_PARA_PROCESS_START_2'
       exporting
-        server_group             = lv_server_group
-        max_no_of_tasks          = lv_max_tasks
+        server_group             = server_group
+        max_no_of_tasks          = max_tasks
         before_rfc_callback_form = 'F_BEFORE_RFC'
         in_rfc_callback_form     = 'F_IN_RFC'
         after_rfc_callback_form  = 'F_AFTER_RFC'
-        callback_prog            = gc_callback_program
+        callback_prog            = callback_program
 *       SHOW_STATUS              = ' '
 *       RESOURCE_TIMEOUT         = 600
 *       TASK_CALL_MODE           = 1
       changing
-        user_param               = ls_user_param
+        user_param               = runtime_params
       exceptions
         invalid_server_group     = 1
         no_resources_available   = 2

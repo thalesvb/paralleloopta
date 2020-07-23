@@ -1,141 +1,147 @@
-*&---------------------------------------------------------------------*
-*& Report  YTVBP_OOPTA_DEMO_01
-*&
-*&---------------------------------------------------------------------*
-*&
-*&
-*&---------------------------------------------------------------------*
 report zproota_demo_01.
 *&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 *
-* Demonstração de um problem que pode ser resolvido por divisão
-* e conquista.
-* Divisão e conquista: https://en.wikipedia.org/wiki/Divide_and_conquer_algorithm
+* Parallel processing to solve a Divide and Conquer problem.
+* https://en.wikipedia.org/wiki/Divide_and_conquer_algorithm
 *
-* Neste caso, se trata de uma ordenação em uma partição, em que
-* subpartições são ordenadas em paralelos e então a lista final`
-* é montada com base no princípio do MergeSort.
-* Sim, a instrução SORT existe na linguagem, mas aqui é demonstrado
-* uma implementação para solucionar um problema de fácil entendimento.
+* This code solves a sorting problem by dividing the entire data
+* universe into parallelized sub-partitions, sort each one, and merge
+* it to build the sorted universe, using MergeSort principle.
+*
+* Yes, we already have SORT statement baked into language syntax,
+* but this is a simple business-agnostic problem to allow peeking
+* and debug.
 *
 *&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 
 class lcl_parallel_sorting definition.
   public section.
     interfaces zif_proota_parallel_code.
-    methods init_data.
-    methods merge_partition
-      importing it_sorted_values type index table.
-    data:
-      m_sorted_numbers   type standard table of i read-only,
-      m_unsorted_numbers type standard table of i read-only.
+    methods init_data
+      importing random_numbers_to_generate type i
+                partition_size type i.
+    methods print_results.
   private section.
+    types: input_object type standard table of i with default key.
+    types: output_object type standard table of i with default key.
     data:
-      m_current_block    type i value 0.
+      random_numbers type standard table of i,
+      sorted_numbers   type standard table of i.
+    data: partition_size type i.
+    data: task_id_counter    type i value 0.
+    data: begin of statistics,
+            tasks_created type i,
+            end of statistics.
+    methods merge_partition
+      importing sorted_partition type output_object.
 
 endclass.
 class lcl_parallel_sorting implementation.
   method init_data.
-    data(rnd) = cl_abap_random_int=>create( ).
-    do 20 times.
-      append rnd->get_next( ) to m_unsorted_numbers.
+    data(rnd) = cl_abap_random_int=>create( seed = conv #( sy-uzeit ) ).
+    do random_numbers_to_generate times.
+      append rnd->get_next( ) to random_numbers.
     enddo.
+    me->partition_size = partition_size.
   endmethod.
-  method zif_proota_parallel_code~context_input.
-    create data er_data type standard table of i.
+  method zif_proota_parallel_code~create_context_input_object.
+    create data context type input_object.
   endmethod.
-  method zif_proota_parallel_code~context_output.
-    create data er_data type standard table of i.
+  method zif_proota_parallel_code~create_context_output_object.
+    create data context type output_object.
   endmethod.
-  method zif_proota_parallel_code~fetch_block_data.
-    constants:
-      lc_block_size type i value 5.
+  method zif_proota_parallel_code~prepare_task_input.
     data:
-      lr_block type ref to i.
+      requested_task_id type ref to i.
 
-    field-symbols:
-      <r> type data,
-      <t> type index table.
-    if block_id is initial.
-      get reference of m_current_block into lr_block.
+    if request_task_id is initial.
+      get reference of task_id_counter into requested_task_id.
     else.
-      create data lr_block.
-      lr_block->* = block_id.
+      create data requested_task_id.
+      requested_task_id->* = request_task_id.
     endif.
 
-    if lr_block->* gt ( lines( m_unsorted_numbers ) div lc_block_size ).
+    if requested_task_id->* gt ( lines( random_numbers ) div partition_size ).
       return.
     else.
-      ev_block_id = lr_block->*.
+      task_id = requested_task_id->*.
     endif.
 
-    zif_proota_parallel_code~context_input(
-      importing
-        er_data = e_data
-    ).
-    assign e_data->* to <t>.
+    data(input) = cast input_object( zif_proota_parallel_code~create_context_input_object( ) ).
 
-    loop at m_unsorted_numbers assigning <r>
-      from lr_block->* * lc_block_size + 1
-      to ( lr_block->* + 1 ) * lc_block_size.
-      append <r> to <t>.
+    loop at random_numbers reference into data(number)
+      from requested_task_id->* * partition_size + 1
+      to ( requested_task_id->* + 1 ) * partition_size.
+      append number->* to input->*.
     endloop.
+    if sy-subrc eq 0.
+      task_input = input.
+      add 1 to requested_task_id->*.
+      add 1 to statistics-tasks_created.
+    else.
+      clear task_id.
+    endif.
 
-    add 1 to lr_block->*.
+
   endmethod.
-  method zif_proota_parallel_code~merge.
-    field-symbols:
-      <t> type index table.
-    assign ctx->* to <t>.
-    merge_partition( it_sorted_values = <t> ).
+  method zif_proota_parallel_code~process_task_output.
+    merge_partition( sorted_partition = cast output_object( task_output )->* ).
   endmethod.
   method zif_proota_parallel_code~worker.
-    field-symbols:
-      <i> type index table,
-      <e> type index table.
-    assign:
-      i_ctx->* to <i>,
-      e_ctx->* to <e>.
-    sort <i>.
-    <e> = <i>.
+    data(input_data) = cast input_object( input ).
+    data(output_data) = cast output_object( output ).
+    sort input_data->*.
+    output_data->* = input_data->*.
   endmethod.
   method merge_partition.
-    field-symbols:
-      <main_value>      type i,
-      <partition_value> type i.
+
     data:
       main_part_idx type i value 1,
       sort_part_idx type i value 1.
 
     read table:
-      m_sorted_numbers assigning <main_value> index main_part_idx,
-      it_sorted_values assigning <partition_value> index sort_part_idx.
+      sorted_numbers reference into data(main_value) index main_part_idx,
+      sorted_partition reference into data(partition_value) index sort_part_idx.
 
-    while <partition_value> is assigned.
-      while <main_value> is assigned and
-            <main_value> le <partition_value>.
+    while partition_value is bound.
+      while main_value is bound and
+            main_value->* le partition_value->*.
         add 1 to main_part_idx.
-        read table m_sorted_numbers assigning <main_value> index main_part_idx.
+        read table sorted_numbers reference into main_value index main_part_idx.
         if sy-subrc ne 0.
-          unassign <main_value>.
+          clear main_value.
         endif.
       endwhile.
-      insert <partition_value> into m_sorted_numbers index main_part_idx.
+      insert partition_value->* into sorted_numbers index main_part_idx.
       add 1 to sort_part_idx.
-      read table m_sorted_numbers assigning <main_value> index main_part_idx.
-      read table it_sorted_values assigning <partition_value> index sort_part_idx.
+      read table sorted_numbers reference into main_value index main_part_idx.
+      read table sorted_partition reference into partition_value index sort_part_idx.
       if sy-subrc ne 0.
-        unassign <partition_value>.
+        clear partition_value.
       endif.
     endwhile.
 
   endmethod.
+
+  method print_results.
+    data(output) = cl_demo_output=>new( ).
+    output->write_data( value = random_numbers name = conv #( 'Original data'(L01) ) ).
+    output->write_data( value = sorted_numbers name = conv #( 'Sorted Data'(L02) ) ).
+    output->write_data( value = statistics     name = conv #( 'Statistics'(L03) ) ).
+    output->display( ).
+  endmethod.
 endclass.
+
+parameters:
+  randomqt type i default 20,
+  partsize type i default 4,
+  maxtasks type i default 5.
 
 start-of-selection.
 
-  break-point.
   data(parallel_sorting) = new lcl_parallel_sorting( ).
-  parallel_sorting->init_data( ).
-  new zcl_proota_parallel_runner( parallel_sorting )->run( ).
-  break-point.
+  parallel_sorting->init_data(
+    random_numbers_to_generate = randomqt
+    partition_size = partsize ).
+  new zcl_proota_parallel_runner( parallel_sorting )->run( max_tasks = maxtasks ).
+  parallel_sorting->print_results( ).

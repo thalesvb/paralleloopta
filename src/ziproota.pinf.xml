@@ -5,7 +5,7 @@
    <PINF>
     <ATTRIBUTES>
      <INTF_NAME>ZIPROOTA</INTF_NAME>
-     <DESCRIPT>Paralleloopta Framework Interface</DESCRIPT>
+     <DESCRIPT>Paralleloopta Framework</DESCRIPT>
     </ATTRIBUTES>
     <ELEMENTS>
      <SCOMELDTLN>

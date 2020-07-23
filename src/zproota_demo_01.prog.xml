@@ -5,6 +5,7 @@
    <PROGDIR>
     <NAME>ZPROOTA_DEMO_01</NAME>
     <DBAPL>S</DBAPL>
+    <DBNA>D$</DBNA>
     <SUBC>1</SUBC>
     <FIXPT>X</FIXPT>
     <LDBNAME>D$S</LDBNAME>
@@ -13,8 +14,8 @@
    <TPOOL>
     <item>
      <ID>R</ID>
-     <ENTRY>Parallelism Framework Demo: Divide and conquer algorithm</ENTRY>
-     <LENGTH>56</LENGTH>
+     <ENTRY>Paralleloopta Demo: Divide and conquer algorithm</ENTRY>
+     <LENGTH>48</LENGTH>
     </item>
    </TPOOL>
   </asx:values>

@@ -5,6 +5,7 @@
    <PROGDIR>
     <NAME>ZPROOTA_FRM</NAME>
     <DBAPL>S</DBAPL>
+    <DBNA>D$</DBNA>
     <SUBC>1</SUBC>
     <FIXPT>X</FIXPT>
     <LDBNAME>D$S</LDBNAME>
@@ -13,8 +14,8 @@
    <TPOOL>
     <item>
      <ID>R</ID>
-     <ENTRY>Parallelism Framework - Forms required by SPTA</ENTRY>
-     <LENGTH>46</LENGTH>
+     <ENTRY>Paralleloopta - Forms required by SPTA</ENTRY>
+     <LENGTH>38</LENGTH>
     </item>
    </TPOOL>
   </asx:values>
