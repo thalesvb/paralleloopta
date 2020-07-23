@@ -1,8 +1,10 @@
 interface zif_proota_parallel_code
   public.
-
+  "! Unique identifier for each task.
   types task_id type spta_t_object_id.
+  "! Data feed as input for task.
   types context_input type ref to data.
+  "! Data received as output from task.
   types context_output type ref to data.
 
   "! Code run on tasks (parallel).
